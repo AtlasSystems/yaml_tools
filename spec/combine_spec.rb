@@ -1,15 +1,17 @@
 require 'yaml_tools'
 
 RSpec.describe YAMLTools::Combiner do
+  sourceFilePath = File.join(__dir__, 'support/combine_source.yml');
+  differenceFilePath = File.join(__dir__, 'support/combine_difference.yml');
+
   describe '#combine' do
-    it 'combines two IO' do
-      source = StringIO.new("root:\n  test: Test\n");
-      difference = StringIO.new("root:\n  new: New\n");
+    it 'combines' do
+      expected = File.read(File.join(__dir__, 'support/combine_expected.yml'));
 
       combiner = YAMLTools::Combiner.new
-      result = combiner.combine(source, difference)
+      result = combiner.combine_files(sourceFilePath, differenceFilePath)
 
-      expect(result).to eq("root:\n  test: Test\n  new: New\n")
+      expect(result).to eq(expected)
     end
   end
 end

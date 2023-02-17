@@ -1,0 +1,15 @@
+en:
+  base: &base_attributes
+    value1: &common_value "Base common value"
+    value3: Base value 3
+  testMap1: &test_map
+    value1: Test map 1 override value 1
+  testMap2:
+    childMap:
+      <<: [*base_attributes, *test_map]
+  testMap3: &another_map
+    value1: Test map 3 value 1
+    value2: Test map 3 value 2
+  testMap4:
+    childMap:
+      <<: *another_map

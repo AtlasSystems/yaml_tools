@@ -1,0 +1,8 @@
+en:
+  base: &base_attributes
+    name: Test
+  more: &more_attributes
+    thing: Thing
+  test:
+    <<: [*base_attributes, *more_attributes]
+    title: Testing

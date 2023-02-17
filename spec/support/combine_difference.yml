@@ -1,0 +1,4 @@
+en:
+  base: &base_attributes
+    name: Changed
+    new_thing: New
