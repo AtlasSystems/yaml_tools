@@ -36,7 +36,31 @@ module YAMLTools
           differenceKey = differencePair[0]
           differenceValue = differencePair[1]
 
-          if (differenceValue.is_a?(Psych::Nodes::Mapping)) then
+          if (differenceKey.value == '<<') then
+            # If aliases or sequences of aliases then merge
+            if ((sourceValue.is_a?(Psych::Nodes::Alias) || sourceValue.is_a?(Psych::Nodes::Sequence)) && (differenceValue.is_a?(Psych::Nodes::Alias) || differenceValue.is_a?(Psych::Nodes::Sequence))) then
+              if (sourceValue.is_a?(Psych::Nodes::Alias) && (differenceValue.is_a?(Psych::Nodes::Sequence) && differenceValue.children.all? {|a| a.is_a?(Psych::Nodes::Alias)})) then
+                # Merge aliases
+                if (differenceValue.children.none? {|a| a.anchor == sourceValue.anchor}) then
+                  # Add alias to sequence
+                  differenceValue.children = differenceValue.children << sourceValue
+                end
+
+                level.insert(0, differenceKey)
+                level.insert(1, differenceValue)
+
+              elsif (differenceValue.is_a?(Psych::Nodes::Alias) && (sourceValue.is_a?(Psych::Nodes::Sequence) && sourceValue.children.all? {|a| a.is_a?(Psych::Nodes::Alias)})) then
+                # Merge aliases
+                if (sourceValue.children.none? {|a| a.anchor == differenceValue.anchor}) then
+                  # Add alias to sequence
+                  sourceValue.children = sourceValue.children << differenceValue
+                end
+
+                level.insert(0, differenceKey)
+                level.insert(1, sourceValue)
+              end
+            end
+          elsif (differenceValue.is_a?(Psych::Nodes::Mapping)) then
             childLevel = combine_levels(sourceValue.children, differenceValue.children)
 
             newMapping = Psych::Nodes::Mapping.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, sourceValue.style)
@@ -61,71 +85,76 @@ module YAMLTools
         differenceValue = differencePair[1]
 
         if (sourceChildren.none? {|i| i[0].value == differenceKey.value}) then
-          level << differenceKey
-          level << differenceValue
-        end
-      }
-
-      level
-    end
-
-    def flatten_merge_keys(s)
-      level = []
-
-      sourceChildren = s.each_slice(2).to_a
-
-      mergeKeys = sourceChildren.find_all {|i| i[0].value == "<<" }
-
-      if (mergeKeys.length > 0) then
-        if (mergeKeys.length == 1) then
-          # Add merge key
-          level << mergeKeys.first[0]
-          level << mergeKeys.first[1]
-        else
-          newSequence = Psych::Nodes::Sequence.new(nil, nil, true, Psych::Nodes::Sequence::FLOW)
-
-          mergeKeys.each {|m|
-            if (m[1].is_a?(Psych::Nodes::Alias)) then
-              newSequence.children << m[1]
-            elsif (m[1].is_a?(Psych::Nodes::Sequence)) then
-              newSequence.children.concat(m[1].children)
-            end
-          }
-
-          level << Psych::Nodes::Scalar.new("<<")
-          level << newSequence
-        end
-      end
-
-      sourceChildren.each {|sourcePair|
-        sourceKey = sourcePair[0]
-        sourceValue = sourcePair[1]
-
-        if (sourceValue.is_a?(Psych::Nodes::Mapping)) then
-          childLevel = flatten_merge_keys(sourceValue.children)
-
-          newMapping = Psych::Nodes::Mapping.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, sourceValue.style)
-
-          if (childLevel.length > 0) then
-            newMapping.children.push(*childLevel)
-          end
-
-          level << sourceKey
-          level << newMapping
-        else
-          if (sourceKey.value != "<<") then
-            level << sourceKey
-            level << sourceValue
+          if (differenceKey.value == '<<') then
+            level.insert(0, differenceKey)
+            level.insert(1, differenceValue)
+          else
+            level << differenceKey
+            level << differenceValue
           end
         end
       }
 
       level
     end
+
+    # def flatten_merge_keys(s)
+    #   level = []
+
+    #   sourceChildren = s.each_slice(2).to_a
+
+    #   mergeKeys = sourceChildren.find_all {|i| i[0].value == "<<" }
+
+    #   if (mergeKeys.length > 0) then
+    #     if (mergeKeys.length == 1) then
+    #       # Add merge key
+    #       level << mergeKeys.first[0]
+    #       level << mergeKeys.first[1]
+    #     else
+    #       newSequence = Psych::Nodes::Sequence.new(nil, nil, true, Psych::Nodes::Sequence::FLOW)
+
+    #       mergeKeys.each {|m|
+    #         if (m[1].is_a?(Psych::Nodes::Alias)) then
+    #           newSequence.children << m[1]
+    #         elsif (m[1].is_a?(Psych::Nodes::Sequence)) then
+    #           newSequence.children.concat(m[1].children)
+    #         end
+    #       }
+
+    #       level << Psych::Nodes::Scalar.new("<<")
+    #       level << newSequence
+    #     end
+    #   end
+
+    #   sourceChildren.each {|sourcePair|
+    #     sourceKey = sourcePair[0]
+    #     sourceValue = sourcePair[1]
+
+    #     if (sourceValue.is_a?(Psych::Nodes::Mapping)) then
+    #       childLevel = flatten_merge_keys(sourceValue.children)
+
+    #       newMapping = Psych::Nodes::Mapping.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, sourceValue.style)
+
+    #       if (childLevel.length > 0) then
+    #         newMapping.children.push(*childLevel)
+    #       end
+
+    #       level << sourceKey
+    #       level << newMapping
+    #     else
+    #       if (sourceKey.value != "<<") then
+    #         level << sourceKey
+    #         level << sourceValue
+    #       end
+    #     end
+    #   }
+
+    #   level
+    # end
 
     def combine_files(sourceFilePath, differenceFilePath)
-      sourceFile = File.open(options[:source], "r")
-      differenceFile = File.open(options[:difference], "r")
+      sourceFile = File.open(sourceFilePath, "r")
+      differenceFile = File.open(differenceFilePath, "r")
 
       begin
         output = combine(sourceFile, differenceFile)
@@ -143,24 +172,13 @@ module YAMLTools
       differenceDocument = YAML.parse(difference)
 
       # Flatten merge keys for older ArchivesSpace files
-      sourceDocument = flatten_merge_keys(sourceDocument.root.children)
-      differenceDocument = flatten_merge_keys(differenceDocument.root.children)
+      sourceDocument = YAMLTools.flatten_merge_keys(sourceDocument.root.children)
+      differenceDocument = YAMLTools.flatten_merge_keys(differenceDocument.root.children)
 
       @combined = combine_levels(sourceDocument, differenceDocument)
 
       if (@combined.length > 0) then
-        combinedDocument = Psych::Nodes::Document.new()
-        combinedDocumentRoot = Psych::Nodes::Mapping.new();
-        combinedDocumentRoot.children.push(*@combined)
-        combinedDocument.children << combinedDocumentRoot
-
-        stream = Psych::Nodes::Stream.new
-        stream.children << combinedDocument
-        output = stream.to_yaml
-
-        # Remove document start
-        document_start = (output.index("---\n") || size - 1) + 4
-        output.slice!(0, document_start)
+        output = YAMLTools.createDocument(@combined)
       else
         output = ''
       end

@@ -3,10 +3,9 @@ require 'yaml'
 module YAMLTools
   class Comparer
     @source_anchors = {}
-    @destination_anchors = {}
     @modified_anchors = []
 
-    def processLevel (s, d, indent = '')
+    def processLevel (s, d, includeAnchorDependencies)
       level = []
 
       # Split into key/value pairs
@@ -15,7 +14,6 @@ module YAMLTools
 
       # Add all anchors for this level for use when performing potential comparisons later
       sourceChildren.find_all {|i| !i[1].is_a?(Psych::Nodes::Alias) && !i[1].anchor.nil?}.each {|i| @source_anchors[i[1].anchor] = i[1]}
-      destinationChildren.find_all {|i| !i[1].is_a?(Psych::Nodes::Alias) && !i[1].anchor.nil?}.each {|i| @destination_anchors[i[1].anchor] = i[1]}
 
       destinationChildren.each {|destinationPair|
         destinationKey = destinationPair[0]
@@ -52,7 +50,7 @@ module YAMLTools
                 if (sourceValue.children.length == destinationValue.children.length) then
                   # Compare sequences
                   sourceValue.children.each_with_index {|a, index|
-                    if (a.anchor != destinationValue.children[index].anchor || @modified_anchors.include?(destinationValue.children[index].anchor)) then
+                    if (a.anchor != destinationValue.children[index].anchor || (includeAnchorDependencies && @modified_anchors.include?(destinationValue.children[index].anchor))) then
                       # Different aliases or ordering
                       level << destinationKey
                       level << destinationValue
@@ -79,7 +77,7 @@ module YAMLTools
                 level << destinationValue
               elsif (destinationValue.is_a?(Psych::Nodes::Alias)) then
                 # Compare aliases
-                if (sourceValue.anchor != destinationValue.anchor || @modified_anchors.include?(destinationValue.anchor)) then
+                if (sourceValue.anchor != destinationValue.anchor || (includeAnchorDependencies && @modified_anchors.include?(destinationValue.anchor))) then
                   # Different aliases
                   level << destinationKey
                   level << destinationValue
@@ -93,7 +91,7 @@ module YAMLTools
               # TODO Handle this
             end
           elsif (destinationValue.is_a?(Psych::Nodes::Mapping)) then
-            childLevel = processLevel(sourceValue.children, destinationValue.children, indent + '  ')
+            childLevel = processLevel(sourceValue.children, destinationValue.children, includeAnchorDependencies)
 
             if (childLevel.length > 0) then
               newMapping = Psych::Nodes::Mapping.new(destinationValue.anchor, destinationValue.tag, destinationValue.implicit, destinationValue.style)
@@ -106,52 +104,46 @@ module YAMLTools
                 @modified_anchors << destinationValue.anchor
               end
             end
-          else
-            # Compare scalars or aliases to scalars
-            if (destinationValue.is_a?(Psych::Nodes::Scalar) || (destinationValue.is_a?(Psych::Nodes::Alias) && @destination_anchors[destinationValue.anchor].is_a?(Psych::Nodes::Scalar))) then
-              # Compare values
+          elsif (destinationValue.is_a?(Psych::Nodes::Scalar)) then
+            if (sourceValue.is_a?(Psych::Nodes::Scalar) && (destinationValue.value != sourceValue.value)) then
+              level << destinationKey
+              level << destinationValue
 
-              if (sourceValue.is_a?(Psych::Nodes::Alias)) then
-                # Use anchor value
-                sourceValueData = @source_anchors[sourceValue.anchor].value
-              else
-                sourceValueData = sourceValue.value
+              if destinationValue.anchor != nil then
+                @modified_anchors << destinationValue.anchor
               end
-
-              if (destinationValue.is_a?(Psych::Nodes::Alias)) then
-                # Use anchor value
-                destinationValueData = @destination_anchors[destinationValue.anchor].value
-              else
-                destinationValueData = destinationValue.value
-              end
-
-              if (destinationValueData != sourceValueData || @modified_anchors.include?(destinationValue.anchor)) then
-                level << destinationKey
-                level << destinationValue
-
-                if (destinationValue.is_a?(Psych::Nodes::Scalar) && destinationValue.anchor != nil) then
-                  @modified_anchors << destinationValue.anchor
-                end
-              end
+            elsif (!sourceValue.is_a?(Psych::Nodes::Alias || (includeAnchorDependencies && @modified_anchors.include?(destinationValue.anchor)))) then
+              level << destinationKey
+              level << destinationValue
+            end
+          elsif (destinationValue.is_a?(Psych::Nodes::Alias)) then
+            if (sourceValue.is_a?(Psych::Nodes::Alias) && (destinationValue.anchor != sourceValue.anchor)) then
+              level << destinationKey
+              level << destinationValue
+            elsif (sourceValue.is_a?(Psych::Nodes::Scalar)) then
+              level << destinationKey
+              level << destinationValue
             end
           end
         end
       }
 
-      # Find source pairs where value is alias that don't exist in destination
-      # Look for aliases whose anchor was modified
-      sourceChildren.find_all {|i|
-        i[1].is_a?(Psych::Nodes::Alias) &&
-        !i[1].anchor.nil? &&
-        @modified_anchors.include?(i[1].anchor)
-      }.each {|sp|
-        dPair = destinationChildren.find_all {|i| i[0].value == sp[0].value}.last
+      if (includeAnchorDependencies)
+        # Find source pairs where value is alias that don't exist in destination
+        # Look for aliases whose anchor was modified
+        sourceChildren.find_all {|i|
+          i[1].is_a?(Psych::Nodes::Alias) &&
+          !i[1].anchor.nil? &&
+          @modified_anchors.include?(i[1].anchor)
+        }.each {|sp|
+          dPair = destinationChildren.find_all {|i| i[0].value == sp[0].value}.last
 
-        if (dPair == nil) then
-          level << sp[0]
-          level << sp[1]
-        end
-      }
+          if (dPair == nil) then
+            level << sp[0]
+            level << sp[1]
+          end
+        }
+      end
 
       level
     end
@@ -220,118 +212,12 @@ module YAMLTools
       level
     end
 
-    def mergeDifferences (s, d)
-      level = []
-
-      # Split into key/value pairs
-      sourceChildren = s.each_slice(2).to_a
-      destinationChildren = d.each_slice(2).to_a
-
-      # Add all source pairs that don't exist in the destination
-
-      sourceChildren.each {|sourcePair|
-        sourceKey = sourcePair[0]
-        sourceValue = sourcePair[1]
-
-        destinationPair = destinationChildren.find_all {|i| i[0].value == sourceKey.value}.last
-
-        if (destinationPair == nil) then
-          level << sourceKey
-          level << sourceValue
-        end
-      }
-
-      # Add all destination pairs that don't exist in the source
-
-      destinationChildren.each {|destinationPair|
-        destinationKey = destinationPair[0]
-        destinationValue = destinationPair[1]
-
-        # Find source pair (Note: when finding key value pairs, we find the last pair since some ArchivesSpace YAML files contain duplicate keys)
-        sourcePair = sourceChildren.find_all {|i| i[0].value == destinationKey.value}.last
-
-        if (sourcePair == nil) then
-          # Source not found so copy node
-          level << destinationKey
-          level << destinationValue
-        else
-          sourceKey = sourcePair[0]
-          sourceValue = sourcePair[1]
-
-          if (sourceValue.class != destinationValue.class) then
-            # If aliases or sequences of aliases then merge
-            if ((sourceValue.is_a?(Psych::Nodes::Alias) || sourceValue.is_a?(Psych::Nodes::Sequence)) && (destinationValue.is_a?(Psych::Nodes::Alias) || destinationValue.is_a?(Psych::Nodes::Sequence))) then
-              if (sourceValue.is_a?(Psych::Nodes::Alias) && (destinationValue.is_a?(Psych::Nodes::Sequence) && destinationValue.children.all? {|a| a.is_a?(Psych::Nodes::Alias)})) then
-                # Merge aliases
-                if (destinationValue.children.none? {|a| a.anchor == sourceValue.anchor}) then
-                  # Add alias to sequence
-                  destinationValue.children = destinationValue.children << sourceValue
-                end
-
-                level << destinationKey
-                level << destinationValue
-
-              elsif (destinationValue.is_a?(Psych::Nodes::Alias) && (sourceValue.is_a?(Psych::Nodes::Sequence) && sourceValue.children.all? {|a| a.is_a?(Psych::Nodes::Alias)})) then
-                # Merge aliases
-                if (sourceValue.children.none? {|a| a.anchor == destinationValue.anchor}) then
-                  # Add alias to sequence
-                  sourceValue.children = sourceValue.children << destinationValue
-                end
-
-                level << destinationKey
-                level << sourceValue
-              end
-            else
-              # Bad data
-              raise "Cannot process different types: #{sourceValue.class} and #{destinationValue.class}"
-            end
-          elsif (destinationValue.is_a?(Psych::Nodes::Mapping)) then
-            childLevel = mergeDifferences(sourceValue.children, destinationValue.children)
-
-            if (childLevel.length > 0) then
-              newMapping = Psych::Nodes::Mapping.new(destinationValue.anchor, destinationValue.tag, destinationValue.implicit, destinationValue.style)
-              newMapping.children.push(*childLevel)
-
-              level << destinationKey
-              level << newMapping
-            end
-          elsif (destinationValue.is_a?(Psych::Nodes::Sequence)) then
-            # Merge sequences
-            newSequence = (sourceValue | destinationValue).uniq {|a| a.anchor}
-
-            level << destinationKey
-            level << newSequence
-
-          elsif (destinationValue.is_a?(Psych::Nodes::Alias)) then
-            # Create sequence if aliases aren't the same
-            if (sourceValue.anchor != destinationValue.anchor) then
-              newSequence = Psych::Nodes::Sequence.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, sourceValue.style)
-              newSequence.children = newSequence.children << sourceValue
-              newSequence.children = newSequence.children << destinationValue
-
-              level << destinationKey
-              level << newSequence
-            else
-              # Aliases are the same
-              level << destinationKey
-              level << destinationValue
-            end
-          else
-            level << destinationKey
-            level << destinationValue
-          end
-        end
-      }
-
-      level
-    end
-
-    def compare_files(sourceFilePath, destinationFilePath)
-      sourceFile = File.open(options[:source], "r")
-      differenceFile = File.open(options[:difference], "r")
+    def compare_files(sourceFilePath, destinationFilePath, includeAnchorDependencies = false)
+      sourceFile = File.open(sourceFilePath, "r")
+      differenceFile = File.open(destinationFilePath, "r")
 
       begin
-        result = compare(sourceFile, differenceFile)
+        result = compare(sourceFile, differenceFile, includeAnchorDependencies)
       ensure
         sourceFile.close
         differenceFile.close
@@ -342,24 +228,29 @@ module YAMLTools
 
     def compare(source, destination, includeAnchorDependencies = false)
       @source_anchors = {}
-      @destination_anchors = {}
       @modified_anchors = []
 
-      y1 = YAML.parse(source)
-      y2 = YAML.parse(destination)
+      sourceDocument = YAML.parse(source)
+      destinationDocument = YAML.parse(destination)
 
-      @differences = processLevel(y1.root.children, y2.root.children)
+      # Flatten merge keys for older ArchivesSpace files
+      sourceRootLevel = YAMLTools.flatten_merge_keys(sourceDocument.root.children)
+      destinationRootLevel = YAMLTools.flatten_merge_keys(destinationDocument.root.children)
+
+      @differences = processLevel(sourceRootLevel, destinationRootLevel, includeAnchorDependencies)
 
       if (includeAnchorDependencies) then
         @current_modified_anchors = []
 
+        combiner = Combiner.new
+
         loop do
           @current_modified_anchors = @modified_anchors.clone
           @modified_anchors = []
-          modified_anchor_additions = processModifiedAnchors(y1.root.children, @current_modified_anchors)
+          modified_anchor_additions = processModifiedAnchors(sourceRootLevel, @current_modified_anchors)
 
           if (modified_anchor_additions.length > 0) then
-            mergedDifferences = mergeDifferences(@differences, modified_anchor_additions);
+            mergedDifferences = combiner.combine_levels(@differences, modified_anchor_additions)
             @differences = mergedDifferences
           end
 
@@ -368,18 +259,7 @@ module YAMLTools
       end
 
       if (@differences.length > 0) then
-        differenceDocument = Psych::Nodes::Document.new()
-        differenceDocumentRoot = Psych::Nodes::Mapping.new();
-        differenceDocumentRoot.children.push(*@differences)
-        differenceDocument.children << differenceDocumentRoot
-
-        stream = Psych::Nodes::Stream.new
-        stream.children << differenceDocument
-        output = stream.to_yaml
-
-        # Remove initial document start
-        document_start = (output.index("---\n") || size - 1) + 4
-        output.slice!(0, document_start)
+        output = YAMLTools.createDocument(@differences)
       else
         output = ''
       end
