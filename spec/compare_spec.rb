@@ -23,7 +23,13 @@ RSpec.describe YAMLTools::Comparer do
       expect(result).to eq(expected)
     end
 
-        expect(result).to eq(expected)
-      end
+    it 'compares same file' do
+      expected = "";
+
+      comparer = YAMLTools::Comparer.new
+      result = comparer.compare_files(originalFilePath, originalFilePath, false)
+
+      expect(result).to eq(expected)
+    end
   end
 end
