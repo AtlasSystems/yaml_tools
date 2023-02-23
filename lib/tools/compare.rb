@@ -68,7 +68,6 @@ module YAMLTools
                 level << destinationValue
               else
                 # Bad data
-                # TODO Handle this
               end
             elsif (sourceValue.is_a?(Psych::Nodes::Alias)) then
               if (destinationValue.is_a?(Psych::Nodes::Sequence)) then
@@ -84,11 +83,9 @@ module YAMLTools
                 end
               else
                 # Bad data
-                # TODO Handle this
               end
             else
               # Bad data
-              # TODO Handle this
             end
           elsif (destinationValue.is_a?(Psych::Nodes::Mapping)) then
             childLevel = processLevel(sourceValue.children, destinationValue.children, includeAnchorDependencies)
@@ -112,7 +109,7 @@ module YAMLTools
               if destinationValue.anchor != nil then
                 @modified_anchors << destinationValue.anchor
               end
-            elsif (!sourceValue.is_a?(Psych::Nodes::Alias || (includeAnchorDependencies && @modified_anchors.include?(destinationValue.anchor)))) then
+            elsif (sourceValue.is_a?(Psych::Nodes::Alias || (includeAnchorDependencies && @modified_anchors.include?(destinationValue.anchor)))) then
               level << destinationKey
               level << destinationValue
             end
