@@ -19,7 +19,9 @@ module YAMLTools
         if (differencePairs.length > 1) then
           if (sourceKey.value == "<<") then
             # Find merge key with matching alias
-            differencePair = differencePairs.find {|i| i[1].is_a?(Psych::Nodes::Alias) && i[1].anchor == sourceValue.anchor}
+            differencePair = differencePairs.find {|i|
+              (i[1].is_a?(Psych::Nodes::Alias) && i[1].anchor == sourceValue.anchor) ||
+              (i[1].is_a?(Psych::Nodes::Sequence) && i[1].children.any? {|a| a.is_a?(Psych::Nodes::Alias) && a.anchor == sourceValue.anchor})}
           else
             # Some ArchivesSpace files have duplicate keys so use the last one
             differencePair = differencePairs.last
@@ -46,7 +48,7 @@ module YAMLTools
                   differenceValue.children = differenceValue.children << sourceValue
                 end
 
-                level.insert(0, differenceKey)
+                level.insert(0, sourceKey)
                 level.insert(1, differenceValue)
 
               elsif (differenceValue.is_a?(Psych::Nodes::Alias) && (sourceValue.is_a?(Psych::Nodes::Sequence) && sourceValue.children.all? {|a| a.is_a?(Psych::Nodes::Alias)})) then
@@ -56,8 +58,31 @@ module YAMLTools
                   sourceValue.children = sourceValue.children << differenceValue
                 end
 
-                level.insert(0, differenceKey)
+                level.insert(0, sourceKey)
                 level.insert(1, sourceValue)
+              elsif (sourceValue.is_a?(Psych::Nodes::Sequence) && differenceValue.is_a?(Psych::Nodes::Sequence))
+                newSequence = Psych::Nodes::Sequence.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, Psych::Nodes::Sequence::FLOW)
+
+                newSequence.children
+                  .concat(sourceValue.children, differenceValue.children)
+                  .uniq! {|a| a.anchor}
+
+                level.insert(0, sourceKey)
+                level.insert(1, newSequence)
+              elsif (sourceValue.is_a?(Psych::Nodes::Alias) && differenceValue.is_a?(Psych::Nodes::Alias))
+                if (sourceValue.anchor == differenceValue.anchor) then
+                  level.insert(0, sourceKey)
+                  level.insert(1, sourceValue)
+                else
+                  newSequence = Psych::Nodes::Sequence.new(sourceValue.anchor, sourceValue.tag, sourceValue.implicit, Psych::Nodes::Sequence::FLOW)
+
+                  newSequence.children
+                    .concat([sourceValue, differenceValue])
+                    .uniq! {|a| a.anchor}
+
+                  level.insert(0, sourceKey)
+                  level.insert(1, newSequence)
+                end
               end
             end
           elsif (differenceValue.is_a?(Psych::Nodes::Mapping)) then
