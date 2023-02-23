@@ -13,5 +13,14 @@ RSpec.describe YAMLTools::Combiner do
 
       expect(result).to eq(expected)
     end
+
+    it 'combines same file' do
+      expected = File.read(sourceFilePath);
+
+      combiner = YAMLTools::Combiner.new
+      result = combiner.combine_files(sourceFilePath, sourceFilePath)
+
+      expect(result).to eq(expected)
+    end
   end
 end
