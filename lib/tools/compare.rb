@@ -81,11 +81,7 @@ module YAMLTools
                   level << destinationKey
                   level << destinationValue
                 end
-              else
-                # Bad data
               end
-            else
-              # Bad data
             end
           elsif (destinationValue.is_a?(Psych::Nodes::Mapping)) then
             childLevel = processLevel(sourceValue.children, destinationValue.children, includeAnchorDependencies)
