@@ -12,8 +12,7 @@ module YAMLTools
     output = stream.to_yaml
 
     # Remove initial document start
-    document_start = (output.index("---\n") || size - 1) + 4
-    output.slice!(0, document_start)
+    output.slice!(0, 4) if (output.start_with?("---\n"))
 
     output
   end
